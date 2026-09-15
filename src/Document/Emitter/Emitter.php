@@ -623,9 +623,15 @@ final class Emitter
 
     private function emitStandaloneComment(CommentNode $comment, int $indent): void
     {
-        // Use the comment's stored indent if it has one; otherwise
-        // the surrounding container's indent.
-        $useIndent = $comment->getIndent() > 0 ? $comment->getIndent() : $indent;
+        // Use the comment's own column when the parser recorded one, so a
+        // comment comes back where its author put it. null means no column was
+        // recorded - a comment built programmatically rather than read from a
+        // document - and those follow the surrounding container.
+        //
+        // Nullable rather than `> 0`: column 1 is a real position, and a
+        // flush-left comment inside an indented block is a deliberate style
+        // that was previously indistinguishable from "unset".
+        $useIndent = $comment->getIndent() ?? $indent;
         $this->buffer .= str_repeat(' ', $useIndent);
         $this->buffer .= $comment->getText();
         $this->buffer .= $this->lineEnding;
@@ -1003,9 +1009,22 @@ final class Emitter
             return false;
         }
         $first = $value[0];
-        $reservedLeaders = ['[', ']', '{', '}', '#', '&', '*', '!', '|', '>', "'", '"', '%', '@', '`', '?', ':', '-', ',', "\t", ' '];
+        $reservedLeaders = ['[', ']', '{', '}', '#', '&', '*', '!', '|', '>', "'", '"', '%', '@', '`', ',', "\t", ' '];
         if (in_array($first, $reservedLeaders, true)) {
             return false;
+        }
+        // "?", ":" and "-" are indicators only when they stand alone or are
+        // followed by a space. YAML 1.2 ns-plain-first admits them otherwise,
+        // so "--cert-dir=/tmp" and "-single-dash" are valid plain scalars and
+        // quoting them rewrites a line the author did not write that way.
+        if (in_array($first, ['?', ':', '-'], true)) {
+            if (strlen($value) === 1) {
+                return false;
+            }
+            $second = $value[1];
+            if ($second === ' ' || $second === "\t") {
+                return false;
+            }
         }
         if (str_contains($value, ': ') || str_contains($value, " #")) {
             return false;
